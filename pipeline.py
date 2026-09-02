@@ -20,13 +20,16 @@ TARGET_SAMPLE_RATE = 16000
 VAD_FRAME_SIZE = 512
 VAD_THRESHOLD = 0.5
 
-# Ultra Low-Latency Chunking
-SILENCE_TIMEOUT_SEC = 0.55     # 550ms pause triggers sentence finalization
-MICRO_SILENCE_TIMEOUT = 0.25   # 250ms breath pause
-SOFT_LIMIT_SEC = 5.0           # Look for a breath at 5s (Down from 14s)
-HARD_LIMIT_SEC = 8.0           # Force cut at 8s to keep NPU decoding sub-second
-OVERLAP_SEC = 0.75             # 750ms context overlap
-MIN_SPEECH_DURATION_SEC = 0.45
+# NPU Queue Management
+MAX_CONCURRENT_REQUESTS = 1   # Matched to FastFlowLLM's maximum queue
+
+# Quality-Optimized Chunking (Anti-Spam)
+SILENCE_TIMEOUT_SEC = 1.0      # Wait for a solid 1s pause to naturally end a chunk
+MICRO_SILENCE_TIMEOUT = 0.4    # 400ms breath pause
+SOFT_LIMIT_SEC = 10.0          # Look for a breath at 10s
+HARD_LIMIT_SEC = 20.0          # Force cut at 20s to ensure NPU context is rich
+OVERLAP_SEC = 1.0              # 1s context overlap to prevent cut words
+MIN_SPEECH_DURATION_SEC = 0.5
 
 MATCH_THRESHOLD = 0.38          
 NEW_SPEAKER_THRESHOLD = 0.28    
@@ -46,10 +49,8 @@ class SpeakerIdentifier:
         self.unknown_count = 0
 
     def compute_embedding(self, audio_float32: np.ndarray) -> torch.Tensor:
-        # SPEED OPTIMIZATION: Use at most the first 3 seconds for embedding
         max_samples = TARGET_SAMPLE_RATE * 3
         slice_audio = audio_float32[:max_samples] if len(audio_float32) > max_samples else audio_float32
-
         wav_tensor = torch.from_numpy(slice_audio).unsqueeze(0).to(torch.float32)
         with torch.no_grad():
             embedding = self.classifier.encode_batch(wav_tensor).squeeze().cpu()
@@ -105,12 +106,10 @@ class WhisperClient:
         self.api_url = api_url
         self.language = "hinglish" 
         self.last_transcript = ""
-        # SPEED OPTIMIZATION: Persistent connection pool (HTTP Keep-Alive)
         self.session = requests.Session()
 
     def transcribe(self, audio_float32: np.ndarray) -> str:
         pcm16 = (audio_float32 * 32767.0).clip(-32768, 32767).astype(np.int16)
-        
         wav_buffer = io.BytesIO()
         with wave.open(wav_buffer, 'wb') as wf:
             wf.setnchannels(1)
@@ -126,19 +125,16 @@ class WhisperClient:
             base_prompt = "This is a conversation in English."
             
         full_prompt = f"{base_prompt} Previous context: {self.last_transcript}"
-
         files = {'file': ('audio.wav', wav_buffer, 'audio/wav')}
         data = {'model': 'whisper-1', 'prompt': full_prompt}
-        
         if self.language == "english":
             data['language'] = 'en'
 
         try:
-            resp = self.session.post(self.api_url, files=files, data=data, timeout=15)
+            resp = self.session.post(self.api_url, files=files, data=data, timeout=25)
             resp.raise_for_status()
             text = resp.json().get("text", "").strip()
-            if text:
-                self.last_transcript = text
+            if text: self.last_transcript = text
             return text
         except Exception:
             return ""
@@ -152,7 +148,6 @@ class AudioCapturer:
         self.input_type = input_type
         self.running = False
         self.p = None
-
         self.sys_queue = queue.Queue()
         self.mic_queue = queue.Queue()
         self.sys_buffer, self.mic_buffer = [], []
@@ -214,18 +209,14 @@ class AudioCapturer:
             if self.input_type in ["system", "both"]:
                 try: sys_chunk, got_audio = self.sys_queue.get(timeout=0.01), True
                 except queue.Empty: pass
-
             if self.input_type in ["mic", "both"]:
                 try: mic_chunk, got_audio = self.mic_queue.get(timeout=0.01), True
                 except queue.Empty: pass
 
             if got_audio:
-                if self.input_type == "both":
-                    self.queue.put(np.clip(sys_chunk + mic_chunk, -1.0, 1.0))
-                elif self.input_type == "system":
-                    self.queue.put(sys_chunk)
-                elif self.input_type == "mic":
-                    self.queue.put(mic_chunk)
+                if self.input_type == "both": self.queue.put(np.clip(sys_chunk + mic_chunk, -1.0, 1.0))
+                elif self.input_type == "system": self.queue.put(sys_chunk)
+                elif self.input_type == "mic": self.queue.put(mic_chunk)
             else:
                 time.sleep(0.01)
 
@@ -238,15 +229,13 @@ class AudioCapturer:
 
         if self.input_type in ["system", "both"] and self.sys_device_index is not None:
             s = self.p.open(format=pyaudio.paInt16, channels=self.sys_channels, rate=self.sys_rate,
-                            input=True, frames_per_buffer=1024, input_device_index=self.sys_device_index,
-                            stream_callback=self._sys_callback)
+                            input=True, frames_per_buffer=1024, input_device_index=self.sys_device_index, stream_callback=self._sys_callback)
             s.start_stream()
             self.streams.append(s)
 
         if self.input_type in ["mic", "both"] and self.mic_device_index is not None:
             s = self.p.open(format=pyaudio.paInt16, channels=self.mic_channels, rate=self.mic_rate,
-                            input=True, frames_per_buffer=1024, input_device_index=self.mic_device_index,
-                            stream_callback=self._mic_callback)
+                            input=True, frames_per_buffer=1024, input_device_index=self.mic_device_index, stream_callback=self._mic_callback)
             s.start_stream()
             self.streams.append(s)
 
@@ -275,7 +264,8 @@ class WispPipeline:
         self.capturer = AudioCapturer(self.audio_queue, input_type=input_type)
         self.speaker_id = SpeakerIdentifier()
         self.whisper = WhisperClient(whisper_url)
-        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+        # THREAD POOL QUEUE LIMIT MATCHED TO NPU
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENT_REQUESTS)
         self.transcript_subscribers = []  
         self.seq_counter = 0 
 
@@ -300,7 +290,6 @@ class WispPipeline:
 
         chunks, samples_collected = [], 0
         samples_needed = TARGET_SAMPLE_RATE * duration_sec
-
         while not self.audio_queue.empty(): self.audio_queue.get()
         while samples_collected < samples_needed:
             try:
@@ -366,7 +355,6 @@ class WispPipeline:
                             current_seq = self.seq_counter
                             self.seq_counter += 1
                             
-                            # UI PLACEHOLDER EVENT: Dispatched instantly when cut occurs
                             self._broadcast({
                                 "type": "pending",
                                 "seq": current_seq,
@@ -402,5 +390,4 @@ class WispPipeline:
             print(f"[{seq_id}] {timestamp}  {speaker_name:<12} (sim: {score:.2f})  {text}")
             self._broadcast(payload)
         else:
-            # Dismiss placeholder if Whisper returns empty text
             self._broadcast({"type": "cancel", "seq": seq_id})

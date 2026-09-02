@@ -363,10 +363,10 @@ async def serve_ui():
                 const box = document.getElementById('transcript-box');
                 const words = item.text.trim().split(/\s+/).length;
 
-                // Thresholds: Same speaker, spoke < 4.0 seconds ago, and bubble has < 50 words
+                // RELAXED THRESHOLDS: Club together if it's the same speaker within 20 SECONDS!
                 const isSameSpeaker = (item.speaker === lastSpeaker);
-                const isQuickExchange = ((item.epoch - lastEpoch) <= 4.0);
-                const isUnderWordLimit = ((currentBubbleWordCount + words) <= 50);
+                const isQuickExchange = ((item.epoch - lastEpoch) <= 20.0); // Up from 4.0s
+                const isUnderWordLimit = ((currentBubbleWordCount + words) <= 150); // Up from 50 words
 
                 if (isSameSpeaker && isQuickExchange && isUnderWordLimit && activeBubbleElement) {
                     // CLUB TOGETHER: Append to the current body
