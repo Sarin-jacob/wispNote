@@ -2,12 +2,12 @@ import io
 import math
 import time
 import wave
-import threading
 import queue
 import numpy as np
 import scipy.signal
 import torch
 import requests
+import concurrent.futures
 import pyaudiowpatch as pyaudio
 from speechbrain.inference.speaker import EncoderClassifier
 
@@ -15,56 +15,49 @@ from speechbrain.inference.speaker import EncoderClassifier
 # CONFIGURATION
 # ==========================================
 WHISPER_API_URL = "http://localhost:52625/v1/audio/transcriptions"
-TARGET_SAMPLE_RATE = 16000  # 16 kHz required by Whisper & VAD
-VAD_FRAME_SIZE = 512        # 32ms frames at 16 kHz for Silero
-VAD_THRESHOLD = 0.5         # Speech probability threshold
-SILENCE_TIMEOUT_SEC = 0.8   # Silence duration to finalize an utterance
-MIN_SPEECH_DURATION_SEC = 0.5 # Minimum speech segment to transcribe
-SIMILARITY_THRESHOLD = 0.60 # Cosine similarity threshold for speaker match
+TARGET_SAMPLE_RATE = 16000
+VAD_FRAME_SIZE = 512
+VAD_THRESHOLD = 0.5
+SILENCE_TIMEOUT_SEC = 0.8
+MIN_SPEECH_DURATION_SEC = 0.5
+SIMILARITY_THRESHOLD = 0.50 # Lowered slightly for better matches in varying noise
+MAX_SPEECH_DURATION_SEC = 18.0
 
 # ==========================================
 # 1. SPEAKER IDENTIFIER (CPU)
 # ==========================================
 class SpeakerIdentifier:
-    """Extracts speaker embeddings and performs cosine similarity matching."""
     def __init__(self):
-        print("[INIT] Loading Speaker Recognition Model (SpeechBrain ECAPA-TDNN on CPU)...")
+        print("[INIT] Loading Speaker Recognition Model (CPU)...")
         self.classifier = EncoderClassifier.from_hparams(
             source="speechbrain/spkrec-ecapa-voxceleb",
             run_opts={"device": "cpu"}
         )
-        self.enrolled_speakers = {}  # {name: torch.Tensor}
+        self.enrolled_speakers = {}
 
     def compute_embedding(self, audio_float32: np.ndarray) -> torch.Tensor:
-        """Computes a normalized speaker embedding vector."""
         wav_tensor = torch.from_numpy(audio_float32).unsqueeze(0).to(torch.float32)
         with torch.no_grad():
-            embedding = self.classifier.encode_batch(wav_tensor)
-            embedding = embedding.squeeze().cpu()
-            # Normalize embedding
+            embedding = self.classifier.encode_batch(wav_tensor).squeeze().cpu()
             embedding = embedding / torch.norm(embedding)
         return embedding
 
     def enroll(self, name: str, audio_float32: np.ndarray):
-        """Registers a participant's voice embedding."""
         embedding = self.compute_embedding(audio_float32)
         self.enrolled_speakers[name] = embedding
-        print(f"[ENROLLED] Speaker '{name}' registered successfully.")
+        print(f"[ENROLLED] '{name}' registered successfully.")
 
     def identify(self, audio_float32: np.ndarray) -> tuple[str, float]:
-        """Matches audio segment against enrolled embeddings using cosine similarity."""
         if not self.enrolled_speakers:
             return "Unknown", 0.0
 
         current_embedding = self.compute_embedding(audio_float32)
-        best_name = "Unknown"
-        highest_sim = -1.0
+        best_name, highest_sim = "Unknown", -1.0
 
         for name, enrolled_emb in self.enrolled_speakers.items():
             similarity = torch.dot(current_embedding, enrolled_emb).item()
             if similarity > highest_sim:
-                highest_sim = similarity
-                best_name = name
+                highest_sim, best_name = similarity, name
 
         if highest_sim < SIMILARITY_THRESHOLD:
             return "Unknown", highest_sim
@@ -74,12 +67,10 @@ class SpeakerIdentifier:
 # 2. FASTFLOWLLM WHISPER CLIENT (NPU)
 # ==========================================
 class WhisperClient:
-    """Handles speech-to-text requests to the FastFlowLLM OpenAI-compatible endpoint."""
     def __init__(self, api_url: str):
         self.api_url = api_url
 
     def transcribe(self, audio_float32: np.ndarray) -> str:
-        # Convert float32 [-1.0, 1.0] to 16-bit PCM WAV
         pcm16 = (audio_float32 * 32767.0).clip(-32768, 32767).astype(np.int16)
         
         wav_buffer = io.BytesIO()
@@ -91,10 +82,13 @@ class WhisperClient:
         wav_buffer.seek(0)
 
         files = {'file': ('audio.wav', wav_buffer, 'audio/wav')}
-        data = {'model': 'whisper-1'}
+        data = {
+            'model': 'whisper-1',
+            'prompt': 'This is a conversation in Hinglish, mixing English and Hindi words. The speakers are saying:'
+        }
 
         try:
-            resp = requests.post(self.api_url, files=files, data=data, timeout=10)
+            resp = requests.post(self.api_url, files=files, data=data, timeout=120)
             resp.raise_for_status()
             return resp.json().get("text", "").strip()
         except Exception as e:
@@ -104,7 +98,6 @@ class WhisperClient:
 # 3. WASAPI SYSTEM AUDIO CAPTURER
 # ==========================================
 class AudioCapturer:
-    """Continuous WASAPI loopback capture with dynamic 16 kHz resampling."""
     def __init__(self, output_queue: queue.Queue):
         self.queue = output_queue
         self.running = False
@@ -128,19 +121,13 @@ class AudioCapturer:
         self.native_channels = device_info["maxInputChannels"]
         self.native_rate = int(device_info["defaultSampleRate"])
         
-        # Calculate resampling factors
         gcd = math.gcd(TARGET_SAMPLE_RATE, self.native_rate)
         self.resample_up = TARGET_SAMPLE_RATE // gcd
         self.resample_down = self.native_rate // gcd
 
     def _audio_callback(self, in_data, frame_count, time_info, status):
-        # Convert raw bytes to numpy array
         raw_audio = np.frombuffer(in_data, dtype=np.int16).reshape(-1, self.native_channels)
-        
-        # Convert to mono float32 [-1.0, 1.0]
         mono = raw_audio.mean(axis=1).astype(np.float32) / 32768.0
-        
-        # Resample to 16 kHz
         resampled = scipy.signal.resample_poly(mono, self.resample_up, self.resample_down)
         self.queue.put(resampled)
         return (None, pyaudio.paContinue)
@@ -174,6 +161,9 @@ class WispPipeline:
         self.capturer = AudioCapturer(self.audio_queue)
         self.speaker_id = SpeakerIdentifier()
         self.whisper = WhisperClient(whisper_url)
+        
+        # Thread pool to handle API requests without blocking the audio loop
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
 
         print("[INIT] Loading Silero VAD (CPU)...")
         self.vad_model, _ = torch.hub.load(
@@ -185,46 +175,43 @@ class WispPipeline:
         self.vad_model.eval()
 
     def enroll_speaker(self, name: str, duration_sec: int = 5):
-        """Helper to enroll a speaker directly from current system output/audio."""
+        # (Keep your existing enroll_speaker code here...)
         print(f"\n--- Enrolling Speaker: '{name}' ---")
-        print(f"Play {name}'s voice for {duration_sec} seconds...")
-        
-        chunks = []
+        print(f"Play {name}'s voice for {duration_sec} seconds (Ensure audio is actively playing!)...")
+        chunks, samples_collected = [], 0
         samples_needed = TARGET_SAMPLE_RATE * duration_sec
-        samples_collected = 0
-
-        # Drain old audio queue
         while not self.audio_queue.empty():
             self.audio_queue.get()
-
         while samples_collected < samples_needed:
-            chunk = self.audio_queue.get()
-            chunks.append(chunk)
-            samples_collected += len(chunk)
-
+            try:
+                chunk = self.audio_queue.get(timeout=1.0)
+                chunks.append(chunk)
+                samples_collected += len(chunk)
+            except queue.Empty:
+                pass 
         audio_clip = np.concatenate(chunks)[:samples_needed]
         self.speaker_id.enroll(name, audio_clip)
 
     def run(self):
-        """Starts real-time transcription and speaker identification loop."""
-        self.capturer.start()
+        if not self.capturer.running:
+            self.capturer.start()
+            
         print("\n" + "="*50)
         print(" [WISP] PIPELINE ACTIVE: Transcribing system audio...")
         print("="*50 + "\n")
 
-        audio_scratchpad = []
-        speech_frames = []
-        is_speaking = False
-        silence_frame_count = 0
+        audio_scratchpad, speech_frames = [], []
+        is_speaking, silence_frame_count = False, 0
         silence_frame_limit = int((SILENCE_TIMEOUT_SEC * TARGET_SAMPLE_RATE) / VAD_FRAME_SIZE)
 
         try:
             while True:
-                # 1. Fetch raw resampled audio chunks
-                chunk = self.audio_queue.get()
-                audio_scratchpad.extend(chunk)
+                try:
+                    chunk = self.audio_queue.get(timeout=1.0)
+                    audio_scratchpad.extend(chunk)
+                except queue.Empty:
+                    continue 
 
-                # 2. Slice into 512-sample frames for Silero VAD
                 while len(audio_scratchpad) >= VAD_FRAME_SIZE:
                     frame = np.array(audio_scratchpad[:VAD_FRAME_SIZE], dtype=np.float32)
                     audio_scratchpad = audio_scratchpad[VAD_FRAME_SIZE:]
@@ -238,40 +225,40 @@ class WispPipeline:
                             is_speaking = True
                         silence_frame_count = 0
                         speech_frames.append(frame)
+                        
+                        # 1. FORCED CHUNKING: Check if speech exceeds maximum allowed duration
+                        current_duration = (len(speech_frames) * VAD_FRAME_SIZE) / TARGET_SAMPLE_RATE
+                        if current_duration >= MAX_SPEECH_DURATION_SEC:
+                            total_audio = np.concatenate(speech_frames)
+                            # Offload to background thread
+                            self.executor.submit(self._dispatch_segment, total_audio)
+                            is_speaking, speech_frames, silence_frame_count = False, [], 0
+                            
                     else:
                         if is_speaking:
                             speech_frames.append(frame)
                             silence_frame_count += 1
-
-                            # 3. Silence threshold reached: process complete utterance
+                            
+                            # 2. NATURAL SILENCE: End of sentence detected
                             if silence_frame_count >= silence_frame_limit:
                                 total_audio = np.concatenate(speech_frames)
-                                duration = len(total_audio) / TARGET_SAMPLE_RATE
-
-                                if duration >= MIN_SPEECH_DURATION_SEC:
-                                    self._dispatch_segment(total_audio)
-
-                                # Reset VAD state
-                                is_speaking = False
-                                speech_frames = []
-                                silence_frame_count = 0
+                                if (len(total_audio) / TARGET_SAMPLE_RATE) >= MIN_SPEECH_DURATION_SEC:
+                                    # Offload to background thread
+                                    self.executor.submit(self._dispatch_segment, total_audio)
+                                is_speaking, speech_frames, silence_frame_count = False, [], 0
 
         except KeyboardInterrupt:
             print("\nStopping audio pipeline...")
             self.capturer.stop()
+            self.executor.shutdown(wait=False)
 
     def _dispatch_segment(self, audio_segment: np.ndarray):
-        """Sends segment to FastFlowLLM (NPU) and Speaker ID (CPU)."""
+        """Runs in a background thread so the VAD loop never stops listening."""
         timestamp = time.strftime("%H:%M:%S")
-
-        # Step A: Speaker Identification (CPU)
         speaker_name, score = self.speaker_id.identify(audio_segment)
-
-        # Step B: Speech-to-Text (FastFlowLLM / NPU)
         text = self.whisper.transcribe(audio_segment)
 
         if text:
-            # Output matching the WispNotes transcript spec
             print(f"{timestamp}  {speaker_name:<10} (sim: {score:.2f})  {text}")
 
 # ==========================================
@@ -280,14 +267,15 @@ class WispPipeline:
 if __name__ == "__main__":
     pipeline = WispPipeline(whisper_url=WHISPER_API_URL)
 
-    # Optional quick enrollment prompt before starting live capture
     print("\n--- Speaker Enrollment Setup ---")
-    enroll_choice = input("Do you want to enroll a participant now? (y/n): ").strip().lower()
-    if enroll_choice == 'y':
-        pipeline.capturer.start() # Start capture temporarily for enrollment
-        name = input("Enter speaker name (e.g., Sarin, Alan): ").strip()
-        pipeline.enroll_speaker(name, duration_sec=5)
-        pipeline.capturer.stop()
+    print("Type a name to enroll. Press ENTER with a blank name when done to start transcribing.")
+    
+    pipeline.capturer.start() 
 
-    # Launch the live engine
+    while True:
+        name = input("\nEnter speaker name (or press Enter to start live transcription): ").strip()
+        if not name:
+            break
+        pipeline.enroll_speaker(name, duration_sec=5)
+
     pipeline.run()
