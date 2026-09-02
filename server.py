@@ -124,10 +124,10 @@ async def serve_ui():
                 --text: #f8fafc; 
                 --subtext: #94a3b8; 
                 --primary: #3b82f6; 
-                --primary-hover: #2563eb;
                 --border: #334155;
                 --danger: #ef4444;
                 --success: #10b981;
+                --unknown-color: #64748b;
             }
             
             body { 
@@ -150,12 +150,8 @@ async def serve_ui():
                 width: 350px; 
                 background: var(--panel); 
                 border-right: 1px solid var(--border); 
-                display: flex; 
-                flex-direction: column; 
-                padding: 24px; 
-                gap: 22px; 
-                box-sizing: border-box; 
-                z-index: 10;
+                display: flex; flex-direction: column; 
+                padding: 24px; gap: 22px; box-sizing: border-box; z-index: 10;
             }
             
             .header-container { display: flex; justify-content: space-between; align-items: center; }
@@ -179,7 +175,6 @@ async def serve_ui():
             button { background: #273549; cursor: pointer; font-weight: 500; }
             button:hover { background: #334155; }
             button.primary { background: var(--primary); border-color: var(--primary); font-weight: 600; }
-            button.primary:hover { background: var(--primary-hover); }
             button.danger { background: rgba(239, 68, 68, 0.15); color: var(--danger); border-color: rgba(239, 68, 68, 0.3); }
             button.danger:hover { background: var(--danger); color: white; }
             
@@ -189,6 +184,7 @@ async def serve_ui():
                 display: flex; justify-content: space-between; align-items: center; cursor: pointer;
             }
             #speaker-list li:hover { background: rgba(15, 23, 42, 0.8); border-color: var(--primary); }
+            .roster-color-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
             
             /* Main Content Area */
             #main { flex: 1; display: flex; flex-direction: column; background: var(--bg); position: relative; }
@@ -211,11 +207,10 @@ async def serve_ui():
             @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
             
             .avatar {
-                width: 36px; height: 36px; border-radius: 50%; background: var(--primary); 
+                width: 36px; height: 36px; border-radius: 50%;
                 display: flex; align-items: center; justify-content: center; font-weight: 600; 
                 font-size: 14px; color: white; flex-shrink: 0;
             }
-            .message-wrapper.Unknown .avatar { background: #475569; }
             
             .message-content {
                 display: flex; flex-direction: column; gap: 4px; max-width: 85%;
@@ -224,12 +219,11 @@ async def serve_ui():
             }
             
             .msg-header { display: flex; align-items: baseline; gap: 10px; }
-            .speaker-tag { font-weight: 600; color: var(--primary); font-size: 13px; }
-            .message-wrapper.Unknown .speaker-tag { color: #94a3b8; }
+            .speaker-tag { font-weight: 600; font-size: 13px; }
             .msg-meta { color: #64748b; font-size: 11px; }
             .msg-body { font-size: 14.5px; line-height: 1.55; color: #e2e8f0; }
 
-            /* Speculative Placeholder Shimmer Card */
+            /* Speculative Placeholder */
             .placeholder-wrapper { display: flex; gap: 14px; opacity: 0.7; animation: pulse 1.5s infinite; }
             @keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.8; } }
             .placeholder-body { display: flex; align-items: center; gap: 6px; font-style: italic; color: #94a3b8; font-size: 13px; }
@@ -290,9 +284,7 @@ async def serve_ui():
                     <button onclick="clearTranscript()" style="background: rgba(255,255,255,0.08); border:none;">Clear View</button>
                 </div>
             </div>
-            <div id="transcript-box">
-                <!-- Messages populate here -->
-            </div>
+            <div id="transcript-box"></div>
         </div>
 
         <script>
@@ -301,11 +293,35 @@ async def serve_ui():
             const pendingChunks = {}; 
             let ws;
 
-            // Conversation tracking variables for Smart Clubbing
             let lastSpeaker = null;
             let lastEpoch = 0;
             let currentBubbleWordCount = 0;
             let activeBubbleElement = null;
+
+            // --- DYNAMIC SPEAKER COLOR PALETTE ---
+            const colorPalette = [
+                '#3b82f6', // Blue
+                '#10b981', // Emerald
+                '#8b5cf6', // Violet
+                '#f59e0b', // Amber
+                '#ec4899', // Pink
+                '#14b8a6', // Teal
+                '#ef4444', // Red
+                '#f97316'  // Orange
+            ];
+            const speakerColors = {};
+            let colorIndex = 0;
+
+            function getSpeakerColor(speakerName) {
+                if (speakerName.startsWith('Unknown')) {
+                    return '#64748b'; // Slate gray for unknowns
+                }
+                if (!speakerColors[speakerName]) {
+                    speakerColors[speakerName] = colorPalette[colorIndex % colorPalette.length];
+                    colorIndex++;
+                }
+                return speakerColors[speakerName];
+            }
 
             function initWebSocket() {
                 const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -334,7 +350,6 @@ async def serve_ui():
 
             function showPlaceholder(data) {
                 const box = document.getElementById('transcript-box');
-                // Don't duplicate placeholder if already present
                 if (document.getElementById(`placeholder-${data.seq}`)) return;
 
                 const pDiv = document.createElement('div');
@@ -358,27 +373,24 @@ async def serve_ui():
                 if (el) el.remove();
             }
 
-            // --- SMART CLUBBING & PARAGRAPHING LOGIC ---
             function renderTranscriptChunk(item) {
                 const box = document.getElementById('transcript-box');
                 const words = item.text.trim().split(/\s+/).length;
 
-                // RELAXED THRESHOLDS: Club together if it's the same speaker within 20 SECONDS!
                 const isSameSpeaker = (item.speaker === lastSpeaker);
-                const isQuickExchange = ((item.epoch - lastEpoch) <= 20.0); // Up from 4.0s
-                const isUnderWordLimit = ((currentBubbleWordCount + words) <= 150); // Up from 50 words
+                const isQuickExchange = ((item.epoch - lastEpoch) <= 20.0); 
+                const isUnderWordLimit = ((currentBubbleWordCount + words) <= 150); 
+
+                const speakerColor = getSpeakerColor(item.speaker);
 
                 if (isSameSpeaker && isQuickExchange && isUnderWordLimit && activeBubbleElement) {
-                    // CLUB TOGETHER: Append to the current body
                     const bodyEl = activeBubbleElement.querySelector('.msg-body');
                     bodyEl.textContent += " " + item.text;
                     
-                    // Update data-text for export
                     const currentTotalText = activeBubbleElement.getAttribute('data-text');
                     activeBubbleElement.setAttribute('data-text', currentTotalText + " " + item.text);
                     currentBubbleWordCount += words;
                 } else {
-                    // BREAKDOWN / NEW BUBBLE: Speaker switch, long pause, or word limit reached
                     const div = document.createElement('div');
                     const isUnknown = item.speaker.startsWith('Unknown');
                     
@@ -390,10 +402,10 @@ async def serve_ui():
                     const initial = isUnknown ? '?' : item.speaker.charAt(0).toUpperCase();
 
                     div.innerHTML = `
-                        <div class="avatar">${initial}</div>
+                        <div class="avatar" style="background-color: ${speakerColor};">${initial}</div>
                         <div class="message-content">
                             <div class="msg-header">
-                                <span class="speaker-tag">${item.speaker}</span>
+                                <span class="speaker-tag" style="color: ${speakerColor};">${item.speaker}</span>
                                 <span class="msg-meta">${item.timestamp}</span>
                             </div>
                             <div class="msg-body">${item.text}</div>
@@ -472,7 +484,15 @@ async def serve_ui():
 
                 data.enrolled.forEach(spk => {
                     const li = document.createElement('li');
-                    li.innerHTML = `<span>${spk}</span> <span style="font-size: 11px; opacity: 0.6;">Edit</span>`;
+                    const color = getSpeakerColor(spk); // Fetch dynamic color
+                    
+                    li.innerHTML = `
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span class="roster-color-dot" style="background-color: ${color};"></span>
+                            <span>${spk}</span>
+                        </div>
+                        <span style="font-size: 11px; opacity: 0.6;">✎ Edit</span>
+                    `;
                     
                     li.onclick = async () => {
                         const newName = prompt(`Rename ${spk} to:`);
@@ -485,11 +505,21 @@ async def serve_ui():
                             });
                             
                             if (renameResp.ok) {
+                                // Retrieve the new color mapped to the updated name
+                                const newColor = getSpeakerColor(formattedNewName);
+                                
                                 document.querySelectorAll('.message-wrapper').forEach(msg => {
                                     if (msg.getAttribute('data-speaker') === spk) {
                                         msg.setAttribute('data-speaker', formattedNewName);
-                                        msg.querySelector('.speaker-tag').textContent = formattedNewName;
-                                        msg.querySelector('.avatar').textContent = formattedNewName.charAt(0).toUpperCase();
+                                        
+                                        const tag = msg.querySelector('.speaker-tag');
+                                        tag.textContent = formattedNewName;
+                                        tag.style.color = newColor;
+                                        
+                                        const avatar = msg.querySelector('.avatar');
+                                        avatar.textContent = formattedNewName.charAt(0).toUpperCase();
+                                        avatar.style.backgroundColor = newColor;
+                                        
                                         if (msg.classList.contains('Unknown') && !formattedNewName.startsWith('Unknown')) {
                                             msg.classList.remove('Unknown');
                                         }
