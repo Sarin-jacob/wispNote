@@ -55,7 +55,6 @@ def config_source(req: ConfigRequest):
     pipeline.stop_pipeline()
     pipeline.input_type = req.input_type
     pipeline.capturer.input_type = req.input_type
-    pipeline.capturer._find_devices()
     pipeline.start_pipeline()
     return {"status": "updated", "input_type": req.input_type}
 

@@ -142,16 +142,15 @@ class AudioCapturer:
         self.queue = output_queue
         self.input_type = input_type
         self.running = False
-        self.p = pyaudio.PyAudio()
+        self.p = None  # Do NOT instantiate PyAudio here anymore
 
         self.sys_queue = queue.Queue()
         self.mic_queue = queue.Queue()
         self.sys_buffer, self.mic_buffer = [], []
         self.sys_device_index, self.mic_device_index = None, None
 
-        self._find_devices()
-
     def _find_devices(self):
+        # (Keep your existing _find_devices code exactly the same here!)
         if self.input_type in ["system", "both"]:
             try:
                 wasapi_info = self.p.get_host_api_info_by_type(pyaudio.paWASAPI)
@@ -181,6 +180,7 @@ class AudioCapturer:
                 print("[WARNING] Default microphone not found.")
 
     def _sys_callback(self, in_data, frame_count, time_info, status):
+        # (Keep your existing callbacks...)
         raw = np.frombuffer(in_data, dtype=np.int16).reshape(-1, self.sys_channels)
         mono = raw.mean(axis=1).astype(np.float32) / 32768.0
         resampled = scipy.signal.resample_poly(mono, self.sys_up, self.sys_down)
@@ -191,6 +191,7 @@ class AudioCapturer:
         return (None, pyaudio.paContinue)
 
     def _mic_callback(self, in_data, frame_count, time_info, status):
+        # (Keep your existing callbacks...)
         raw = np.frombuffer(in_data, dtype=np.int16).reshape(-1, self.mic_channels)
         mono = raw.mean(axis=1).astype(np.float32) / 32768.0
         resampled = scipy.signal.resample_poly(mono, self.mic_up, self.mic_down)
@@ -201,6 +202,7 @@ class AudioCapturer:
         return (None, pyaudio.paContinue)
 
     def _mixer_thread(self):
+        # (Keep your existing mixer...)
         while self.running:
             sys_chunk = np.zeros(VAD_FRAME_SIZE, dtype=np.float32)
             mic_chunk = np.zeros(VAD_FRAME_SIZE, dtype=np.float32)
@@ -232,6 +234,10 @@ class AudioCapturer:
     def start(self):
         if self.running: return
         self.running = True
+        
+        # 1. CREATE FRESH PYAUDIO INSTANCE HERE
+        self.p = pyaudio.PyAudio()
+        self._find_devices()
         self.streams = []
 
         if self.input_type in ["system", "both"] and self.sys_device_index is not None:
@@ -259,7 +265,12 @@ class AudioCapturer:
                     s.stop_stream()
                     s.close()
                 except Exception: pass
-        self.p.terminate()
+            self.streams = []
+            
+        # 2. COMPLETELY DESTROY PYAUDIO TO RELEASE WASAPI LOCKS
+        if self.p is not None:
+            self.p.terminate()
+            self.p = None
 
 # ==========================================
 # 4. WISP PIPELINE COORDINATOR
