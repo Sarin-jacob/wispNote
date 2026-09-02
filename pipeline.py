@@ -22,12 +22,10 @@ VAD_THRESHOLD = 0.5
 SILENCE_TIMEOUT_SEC = 0.8
 MIN_SPEECH_DURATION_SEC = 0.5
 
-# Diarization Tuning
-MATCH_THRESHOLD = 0.38          # Above this = definite match
-NEW_SPEAKER_THRESHOLD = 0.28    # Must be strictly lower than this to create Unknown_N
-MIN_SEC_FOR_NEW_PROFILE = 1.2   # Audio must be at least this long to mint a new profile
+MATCH_THRESHOLD = 0.38          
+NEW_SPEAKER_THRESHOLD = 0.28    
+MIN_SEC_FOR_NEW_PROFILE = 1.2   
 
-# Chunking & Overlap Limits
 SOFT_LIMIT_SEC = 14.0
 HARD_LIMIT_SEC = 18.0
 OVERLAP_SEC = 1.0
@@ -43,9 +41,8 @@ class SpeakerIdentifier:
             source="speechbrain/spkrec-ecapa-voxceleb",
             run_opts={"device": "cpu"}
         )
-        self.enrolled_speakers = {}  # {name: torch.Tensor}
+        self.enrolled_speakers = {}  
         self.unknown_count = 0
-        self.last_speaker = "Unknown"
 
     def compute_embedding(self, audio_float32: np.ndarray) -> torch.Tensor:
         wav_tensor = torch.from_numpy(audio_float32).unsqueeze(0).to(torch.float32)
@@ -57,47 +54,42 @@ class SpeakerIdentifier:
     def enroll(self, name: str, audio_float32: np.ndarray):
         embedding = self.compute_embedding(audio_float32)
         self.enrolled_speakers[name] = embedding
-        print(f"[ENROLLED] '{name}' registered successfully.")
+
+    def rename_speaker(self, old_name: str, new_name: str):
+        if old_name in self.enrolled_speakers:
+            self.enrolled_speakers[new_name] = self.enrolled_speakers.pop(old_name)
+
+    def clear_speakers(self):
+        self.enrolled_speakers.clear()
+        self.unknown_count = 0
 
     def identify(self, audio_float32: np.ndarray) -> tuple[str, float]:
-        current_duration = len(audio_float32) / TARGET_SAMPLE_RATE
+        current_dur = len(audio_float32) / TARGET_SAMPLE_RATE
         current_embedding = self.compute_embedding(audio_float32)
 
-        # Baseline: If no profiles exist at all
         if not self.enrolled_speakers:
             self.unknown_count += 1
             new_name = f"Unknown_{self.unknown_count}"
             self.enrolled_speakers[new_name] = current_embedding
-            self.last_speaker = new_name
             return new_name, 1.0
 
-        best_name = "Unknown"
-        highest_sim = -1.0
-
-        # Compare against all known and auto-enrolled profiles
+        best_name, highest_sim = "Unknown", -1.0
         for name, enrolled_emb in self.enrolled_speakers.items():
-            similarity = torch.dot(current_embedding, enrolled_emb).item()
-            if similarity > highest_sim:
-                highest_sim = similarity
-                best_name = name
+            sim = torch.dot(current_embedding, enrolled_emb).item()
+            if sim > highest_sim:
+                highest_sim, best_name = sim, name
 
-        # 1. Strong Match: Update moving average centroid
         if highest_sim >= MATCH_THRESHOLD:
-            # 80% existing baseline + 20% fresh utterance
             updated_emb = 0.80 * self.enrolled_speakers[best_name] + 0.20 * current_embedding
             self.enrolled_speakers[best_name] = updated_emb / torch.norm(updated_emb)
-            self.last_speaker = best_name
             return best_name, highest_sim
 
-        # 2. Ambiguous Region (0.28 <= sim < 0.38): Attribute to best match or last speaker
-        if highest_sim >= NEW_SPEAKER_THRESHOLD or current_duration < MIN_SEC_FOR_NEW_PROFILE:
+        if highest_sim >= NEW_SPEAKER_THRESHOLD or current_dur < MIN_SEC_FOR_NEW_PROFILE:
             return best_name, highest_sim
 
-        # 3. Definite Divergence (< 0.28 and >= 1.2s of audio): Mint a new Unknown profile
         self.unknown_count += 1
         new_name = f"Unknown_{self.unknown_count}"
         self.enrolled_speakers[new_name] = current_embedding
-        self.last_speaker = new_name
         return new_name, highest_sim
 
 # ==========================================
@@ -106,6 +98,8 @@ class SpeakerIdentifier:
 class WhisperClient:
     def __init__(self, api_url: str):
         self.api_url = api_url
+        self.language = "hinglish" 
+        self.last_transcript = ""
 
     def transcribe(self, audio_float32: np.ndarray) -> str:
         pcm16 = (audio_float32 * 32767.0).clip(-32768, 32767).astype(np.int16)
@@ -118,19 +112,29 @@ class WhisperClient:
             wf.writeframes(pcm16.tobytes())
         wav_buffer.seek(0)
 
+        # Dynamic context prompt to prevent overlap duplication
+        base_prompt = ""
+        if self.language == "hinglish":
+            base_prompt = "This is a conversation in Hinglish, mixing English and Hindi words."
+        elif self.language == "english":
+            base_prompt = "This is a conversation in English."
+            
+        full_prompt = f"{base_prompt} Previous context: {self.last_transcript}"
+
         files = {'file': ('audio.wav', wav_buffer, 'audio/wav')}
-        data = {
-            'model': 'whisper-1',
-            'prompt': 'This is a conversation in Hinglish, mixing English and Hindi words. The speakers are saying:'
-        }
+        data = {'model': 'whisper-1', 'prompt': full_prompt}
+        
+        # Whisper auto-detects by default, but we can force it if it's strictly english
+        if self.language == "english":
+            data['language'] = 'en'
 
         try:
             resp = requests.post(self.api_url, files=files, data=data, timeout=30)
             resp.raise_for_status()
-            response_data = resp.json()
-            if isinstance(response_data, dict):
-                return response_data.get("text", "").strip()
-            return ""
+            text = resp.json().get("text", "").strip()
+            if text:
+                self.last_transcript = text # Save for next overlap
+            return text
         except Exception:
             return ""
 
@@ -142,7 +146,7 @@ class AudioCapturer:
         self.queue = output_queue
         self.input_type = input_type
         self.running = False
-        self.p = None  # Do NOT instantiate PyAudio here anymore
+        self.p = None
 
         self.sys_queue = queue.Queue()
         self.mic_queue = queue.Queue()
@@ -150,7 +154,6 @@ class AudioCapturer:
         self.sys_device_index, self.mic_device_index = None, None
 
     def _find_devices(self):
-        # (Keep your existing _find_devices code exactly the same here!)
         if self.input_type in ["system", "both"]:
             try:
                 wasapi_info = self.p.get_host_api_info_by_type(pyaudio.paWASAPI)
@@ -165,8 +168,7 @@ class AudioCapturer:
                     self.sys_rate = int(sys_info["defaultSampleRate"])
                     gcd = math.gcd(TARGET_SAMPLE_RATE, self.sys_rate)
                     self.sys_up, self.sys_down = TARGET_SAMPLE_RATE // gcd, self.sys_rate // gcd
-            except OSError:
-                print("[WARNING] WASAPI Loopback not found.")
+            except OSError: pass
 
         if self.input_type in ["mic", "both"]:
             try:
@@ -176,11 +178,9 @@ class AudioCapturer:
                 self.mic_rate = int(mic_info["defaultSampleRate"])
                 gcd = math.gcd(TARGET_SAMPLE_RATE, self.mic_rate)
                 self.mic_up, self.mic_down = TARGET_SAMPLE_RATE // gcd, self.mic_rate // gcd
-            except OSError:
-                print("[WARNING] Default microphone not found.")
+            except OSError: pass
 
     def _sys_callback(self, in_data, frame_count, time_info, status):
-        # (Keep your existing callbacks...)
         raw = np.frombuffer(in_data, dtype=np.int16).reshape(-1, self.sys_channels)
         mono = raw.mean(axis=1).astype(np.float32) / 32768.0
         resampled = scipy.signal.resample_poly(mono, self.sys_up, self.sys_down)
@@ -191,7 +191,6 @@ class AudioCapturer:
         return (None, pyaudio.paContinue)
 
     def _mic_callback(self, in_data, frame_count, time_info, status):
-        # (Keep your existing callbacks...)
         raw = np.frombuffer(in_data, dtype=np.int16).reshape(-1, self.mic_channels)
         mono = raw.mean(axis=1).astype(np.float32) / 32768.0
         resampled = scipy.signal.resample_poly(mono, self.mic_up, self.mic_down)
@@ -202,28 +201,22 @@ class AudioCapturer:
         return (None, pyaudio.paContinue)
 
     def _mixer_thread(self):
-        # (Keep your existing mixer...)
         while self.running:
             sys_chunk = np.zeros(VAD_FRAME_SIZE, dtype=np.float32)
             mic_chunk = np.zeros(VAD_FRAME_SIZE, dtype=np.float32)
             got_audio = False
 
             if self.input_type in ["system", "both"]:
-                try:
-                    sys_chunk = self.sys_queue.get(timeout=0.01)
-                    got_audio = True
+                try: sys_chunk, got_audio = self.sys_queue.get(timeout=0.01), True
                 except queue.Empty: pass
 
             if self.input_type in ["mic", "both"]:
-                try:
-                    mic_chunk = self.mic_queue.get(timeout=0.01)
-                    got_audio = True
+                try: mic_chunk, got_audio = self.mic_queue.get(timeout=0.01), True
                 except queue.Empty: pass
 
             if got_audio:
                 if self.input_type == "both":
-                    mixed = np.clip(sys_chunk + mic_chunk, -1.0, 1.0)
-                    self.queue.put(mixed)
+                    self.queue.put(np.clip(sys_chunk + mic_chunk, -1.0, 1.0))
                 elif self.input_type == "system":
                     self.queue.put(sys_chunk)
                 elif self.input_type == "mic":
@@ -234,8 +227,6 @@ class AudioCapturer:
     def start(self):
         if self.running: return
         self.running = True
-        
-        # 1. CREATE FRESH PYAUDIO INSTANCE HERE
         self.p = pyaudio.PyAudio()
         self._find_devices()
         self.streams = []
@@ -261,13 +252,9 @@ class AudioCapturer:
         self.running = False
         if hasattr(self, 'streams'):
             for s in self.streams:
-                try:
-                    s.stop_stream()
-                    s.close()
+                try: s.stop_stream(); s.close()
                 except Exception: pass
             self.streams = []
-            
-        # 2. COMPLETELY DESTROY PYAUDIO TO RELEASE WASAPI LOCKS
         if self.p is not None:
             self.p.terminate()
             self.p = None
@@ -284,7 +271,8 @@ class WispPipeline:
         self.speaker_id = SpeakerIdentifier()
         self.whisper = WhisperClient(whisper_url)
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
-        self.transcript_subscribers = []  # Callbacks for FastAPI WebSockets
+        self.transcript_subscribers = []  
+        self.seq_counter = 0 # Track order of chunks
 
         print("[INIT] Loading Silero VAD (CPU)...")
         self.vad_model, _ = torch.hub.load(
@@ -298,15 +286,12 @@ class WispPipeline:
 
     def enroll_speaker(self, name: str, duration_sec: int = 5):
         was_active = self.is_active
-        if not self.capturer.running:
-            self.capturer.start()
+        if not self.capturer.running: self.capturer.start()
 
         chunks, samples_collected = [], 0
         samples_needed = TARGET_SAMPLE_RATE * duration_sec
 
-        while not self.audio_queue.empty():
-            self.audio_queue.get()
-
+        while not self.audio_queue.empty(): self.audio_queue.get()
         while samples_collected < samples_needed:
             try:
                 chunk = self.audio_queue.get(timeout=1.0)
@@ -314,15 +299,13 @@ class WispPipeline:
                 samples_collected += len(chunk)
             except queue.Empty: pass
 
-        audio_clip = np.concatenate(chunks)[:samples_needed]
-        self.speaker_id.enroll(name, audio_clip)
-
-        if not was_active:
-            self.capturer.stop()
+        self.speaker_id.enroll(name, np.concatenate(chunks)[:samples_needed])
+        if not was_active: self.capturer.stop()
 
     def start_pipeline(self):
         if self.is_active: return
         self.is_active = True
+        self.seq_counter = 0 
         self.worker_thread = threading.Thread(target=self._run_loop, daemon=True)
         self.worker_thread.start()
 
@@ -370,7 +353,10 @@ class WispPipeline:
                     if hit_natural_end or hit_soft_limit or hit_hard_limit:
                         total_audio = np.concatenate(speech_frames)
                         if (len(total_audio) / TARGET_SAMPLE_RATE) >= MIN_SPEECH_DURATION_SEC:
-                            self.executor.submit(self._dispatch_segment, total_audio)
+                            # Stamping the sequence ID for chronological frontend sorting
+                            current_seq = self.seq_counter
+                            self.seq_counter += 1
+                            self.executor.submit(self._dispatch_segment, total_audio, current_seq)
 
                         if hit_natural_end:
                             speech_frames = []
@@ -380,20 +366,20 @@ class WispPipeline:
                             speech_frames = speech_frames[-overlap_count:] if len(speech_frames) > overlap_count else []
                         silence_frame_count = 0
 
-    def _dispatch_segment(self, audio_segment: np.ndarray):
+    def _dispatch_segment(self, audio_segment: np.ndarray, seq_id: int):
         timestamp = time.strftime("%H:%M:%S")
         speaker_name, score = self.speaker_id.identify(audio_segment)
         text = self.whisper.transcribe(audio_segment)
 
         if text:
             payload = {
+                "seq": seq_id,
                 "timestamp": timestamp,
                 "speaker": speaker_name,
                 "similarity": round(score, 2),
                 "text": text
             }
-            # Distribute payload to WebSockets and console
-            print(f"{timestamp}  {speaker_name:<12} (sim: {score:.2f})  {text}")
+            print(f"[{seq_id}] {timestamp}  {speaker_name:<12} (sim: {score:.2f})  {text}")
             for sub in self.transcript_subscribers:
                 try: sub(payload)
                 except Exception: pass
