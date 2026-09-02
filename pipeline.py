@@ -19,17 +19,18 @@ WHISPER_API_URL = "http://localhost:52625/v1/audio/transcriptions"
 TARGET_SAMPLE_RATE = 16000
 VAD_FRAME_SIZE = 512
 VAD_THRESHOLD = 0.5
-SILENCE_TIMEOUT_SEC = 0.8
-MIN_SPEECH_DURATION_SEC = 0.5
+
+# Ultra Low-Latency Chunking
+SILENCE_TIMEOUT_SEC = 0.55     # 550ms pause triggers sentence finalization
+MICRO_SILENCE_TIMEOUT = 0.25   # 250ms breath pause
+SOFT_LIMIT_SEC = 5.0           # Look for a breath at 5s (Down from 14s)
+HARD_LIMIT_SEC = 8.0           # Force cut at 8s to keep NPU decoding sub-second
+OVERLAP_SEC = 0.75             # 750ms context overlap
+MIN_SPEECH_DURATION_SEC = 0.45
 
 MATCH_THRESHOLD = 0.38          
 NEW_SPEAKER_THRESHOLD = 0.28    
 MIN_SEC_FOR_NEW_PROFILE = 1.2   
-
-SOFT_LIMIT_SEC = 14.0
-HARD_LIMIT_SEC = 18.0
-OVERLAP_SEC = 1.0
-MICRO_SILENCE_TIMEOUT = 0.3
 
 # ==========================================
 # 1. SPEAKER IDENTIFIER (CPU)
@@ -45,7 +46,11 @@ class SpeakerIdentifier:
         self.unknown_count = 0
 
     def compute_embedding(self, audio_float32: np.ndarray) -> torch.Tensor:
-        wav_tensor = torch.from_numpy(audio_float32).unsqueeze(0).to(torch.float32)
+        # SPEED OPTIMIZATION: Use at most the first 3 seconds for embedding
+        max_samples = TARGET_SAMPLE_RATE * 3
+        slice_audio = audio_float32[:max_samples] if len(audio_float32) > max_samples else audio_float32
+
+        wav_tensor = torch.from_numpy(slice_audio).unsqueeze(0).to(torch.float32)
         with torch.no_grad():
             embedding = self.classifier.encode_batch(wav_tensor).squeeze().cpu()
             embedding = embedding / torch.norm(embedding)
@@ -100,6 +105,8 @@ class WhisperClient:
         self.api_url = api_url
         self.language = "hinglish" 
         self.last_transcript = ""
+        # SPEED OPTIMIZATION: Persistent connection pool (HTTP Keep-Alive)
+        self.session = requests.Session()
 
     def transcribe(self, audio_float32: np.ndarray) -> str:
         pcm16 = (audio_float32 * 32767.0).clip(-32768, 32767).astype(np.int16)
@@ -112,7 +119,6 @@ class WhisperClient:
             wf.writeframes(pcm16.tobytes())
         wav_buffer.seek(0)
 
-        # Dynamic context prompt to prevent overlap duplication
         base_prompt = ""
         if self.language == "hinglish":
             base_prompt = "This is a conversation in Hinglish, mixing English and Hindi words."
@@ -124,22 +130,21 @@ class WhisperClient:
         files = {'file': ('audio.wav', wav_buffer, 'audio/wav')}
         data = {'model': 'whisper-1', 'prompt': full_prompt}
         
-        # Whisper auto-detects by default, but we can force it if it's strictly english
         if self.language == "english":
             data['language'] = 'en'
 
         try:
-            resp = requests.post(self.api_url, files=files, data=data, timeout=30)
+            resp = self.session.post(self.api_url, files=files, data=data, timeout=15)
             resp.raise_for_status()
             text = resp.json().get("text", "").strip()
             if text:
-                self.last_transcript = text # Save for next overlap
+                self.last_transcript = text
             return text
         except Exception:
             return ""
 
 # ==========================================
-# 3. WASAPI / MIC DUAL AUDIO CAPTURER
+# 3. WASAPI / MIC AUDIO CAPTURER
 # ==========================================
 class AudioCapturer:
     def __init__(self, output_queue: queue.Queue, input_type: str = "both"):
@@ -272,7 +277,7 @@ class WispPipeline:
         self.whisper = WhisperClient(whisper_url)
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
         self.transcript_subscribers = []  
-        self.seq_counter = 0 # Track order of chunks
+        self.seq_counter = 0 
 
         print("[INIT] Loading Silero VAD (CPU)...")
         self.vad_model, _ = torch.hub.load(
@@ -283,6 +288,11 @@ class WispPipeline:
 
     def subscribe(self, callback):
         self.transcript_subscribers.append(callback)
+
+    def _broadcast(self, payload: dict):
+        for sub in self.transcript_subscribers:
+            try: sub(payload)
+            except Exception: pass
 
     def enroll_speaker(self, name: str, duration_sec: int = 5):
         was_active = self.is_active
@@ -353,9 +363,16 @@ class WispPipeline:
                     if hit_natural_end or hit_soft_limit or hit_hard_limit:
                         total_audio = np.concatenate(speech_frames)
                         if (len(total_audio) / TARGET_SAMPLE_RATE) >= MIN_SPEECH_DURATION_SEC:
-                            # Stamping the sequence ID for chronological frontend sorting
                             current_seq = self.seq_counter
                             self.seq_counter += 1
+                            
+                            # UI PLACEHOLDER EVENT: Dispatched instantly when cut occurs
+                            self._broadcast({
+                                "type": "pending",
+                                "seq": current_seq,
+                                "timestamp": time.strftime("%H:%M:%S")
+                            })
+
                             self.executor.submit(self._dispatch_segment, total_audio, current_seq)
 
                         if hit_natural_end:
@@ -368,18 +385,22 @@ class WispPipeline:
 
     def _dispatch_segment(self, audio_segment: np.ndarray, seq_id: int):
         timestamp = time.strftime("%H:%M:%S")
+        epoch_now = time.time()
         speaker_name, score = self.speaker_id.identify(audio_segment)
         text = self.whisper.transcribe(audio_segment)
 
         if text:
             payload = {
+                "type": "transcript",
                 "seq": seq_id,
                 "timestamp": timestamp,
+                "epoch": epoch_now,
                 "speaker": speaker_name,
                 "similarity": round(score, 2),
                 "text": text
             }
             print(f"[{seq_id}] {timestamp}  {speaker_name:<12} (sim: {score:.2f})  {text}")
-            for sub in self.transcript_subscribers:
-                try: sub(payload)
-                except Exception: pass
+            self._broadcast(payload)
+        else:
+            # Dismiss placeholder if Whisper returns empty text
+            self._broadcast({"type": "cancel", "seq": seq_id})

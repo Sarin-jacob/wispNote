@@ -140,7 +140,6 @@ async def serve_ui():
                 overflow: hidden; 
             }
             
-            /* Scrollbar styling */
             ::-webkit-scrollbar { width: 8px; }
             ::-webkit-scrollbar-track { background: transparent; }
             ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
@@ -148,94 +147,93 @@ async def serve_ui():
 
             /* Sidebar */
             #sidebar { 
-                width: 360px; 
+                width: 350px; 
                 background: var(--panel); 
                 border-right: 1px solid var(--border); 
                 display: flex; 
                 flex-direction: column; 
                 padding: 24px; 
-                gap: 24px; 
+                gap: 22px; 
                 box-sizing: border-box; 
-                box-shadow: 4px 0 15px rgba(0,0,0,0.2);
                 z-index: 10;
             }
             
             .header-container { display: flex; justify-content: space-between; align-items: center; }
-            h1 { font-size: 22px; margin: 0; font-weight: 700; letter-spacing: -0.5px;}
+            h1 { font-size: 20px; margin: 0; font-weight: 700; }
             
             .status-badge {
                 display: flex; align-items: center; gap: 6px;
-                padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;
-                background: rgba(148, 163, 184, 0.1); color: var(--subtext); transition: all 0.3s ease;
+                padding: 5px 10px; border-radius: 20px; font-size: 11px; font-weight: 600;
+                background: rgba(148, 163, 184, 0.1); color: var(--subtext);
             }
             .status-badge.live { background: rgba(16, 185, 129, 0.15); color: var(--success); }
-            .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+            .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
             
-            .section-title { font-size: 11px; text-transform: uppercase; color: var(--subtext); font-weight: 700; letter-spacing: 0.5px; margin-bottom: 10px; }
+            .section-title { font-size: 11px; text-transform: uppercase; color: var(--subtext); font-weight: 700; margin-bottom: 8px; }
             
             button, select, input { 
-                width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border); 
-                background: rgba(15, 23, 42, 0.6); color: white; font-family: 'Inter', sans-serif; font-size: 14px;
+                width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); 
+                background: rgba(15, 23, 42, 0.6); color: white; font-family: 'Inter', sans-serif; font-size: 13px;
                 outline: none; transition: all 0.2s;
             }
-            input:focus, select:focus { border-color: var(--primary); }
-            
             button { background: #273549; cursor: pointer; font-weight: 500; }
             button:hover { background: #334155; }
-            button.primary { background: var(--primary); border-color: var(--primary); font-weight: 600; box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3); }
+            button.primary { background: var(--primary); border-color: var(--primary); font-weight: 600; }
             button.primary:hover { background: var(--primary-hover); }
             button.danger { background: rgba(239, 68, 68, 0.15); color: var(--danger); border-color: rgba(239, 68, 68, 0.3); }
             button.danger:hover { background: var(--danger); color: white; }
             
-            /* Roster List */
-            #speaker-list { list-style: none; padding: 0; margin: 0; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 8px; }
+            #speaker-list { list-style: none; padding: 0; margin: 0; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 6px; }
             #speaker-list li { 
-                background: rgba(15, 23, 42, 0.4); padding: 10px 14px; border-radius: 8px; font-size: 14px; 
-                display: flex; justify-content: space-between; align-items: center; border: 1px solid transparent; 
-                cursor: pointer; transition: all 0.2s;
+                background: rgba(15, 23, 42, 0.4); padding: 8px 12px; border-radius: 6px; font-size: 13px; 
+                display: flex; justify-content: space-between; align-items: center; cursor: pointer;
             }
-            #speaker-list li:hover { border-color: var(--primary); background: rgba(15, 23, 42, 0.8); transform: translateY(-1px);}
+            #speaker-list li:hover { background: rgba(15, 23, 42, 0.8); border-color: var(--primary); }
             
-            /* Main Chat Area */
+            /* Main Content Area */
             #main { flex: 1; display: flex; flex-direction: column; background: var(--bg); position: relative; }
-            
             #header { 
                 display: flex; justify-content: space-between; align-items: center; 
-                padding: 24px 40px; border-bottom: 1px solid var(--border); background: rgba(11, 17, 32, 0.8);
-                backdrop-filter: blur(10px); z-index: 5;
+                padding: 20px 36px; border-bottom: 1px solid var(--border); background: rgba(11, 17, 32, 0.8);
+                backdrop-filter: blur(8px);
             }
-            #header h2 { margin: 0; font-size: 18px; font-weight: 600; }
-            .header-buttons { display: flex; gap: 12px; }
-            .header-buttons button { width: auto; padding: 8px 16px; font-size: 13px; border-radius: 20px; }
+            #header h2 { margin: 0; font-size: 17px; font-weight: 600; }
+            .header-buttons { display: flex; gap: 10px; }
+            .header-buttons button { width: auto; padding: 6px 14px; font-size: 12px; border-radius: 18px; }
             
             #transcript-box { 
                 flex: 1; overflow-y: auto; display: flex; flex-direction: column; 
-                gap: 20px; padding: 30px 40px; scroll-behavior: smooth;
+                gap: 16px; padding: 24px 36px; scroll-behavior: smooth;
             }
             
-            /* Message Bubbles */
-            .message-wrapper { display: flex; gap: 16px; animation: fadeIn 0.3s ease forwards; }
-            @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+            /* Message Styles */
+            .message-wrapper { display: flex; gap: 14px; animation: fadeIn 0.25s ease forwards; }
+            @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
             
             .avatar {
-                width: 40px; height: 40px; border-radius: 50%; background: var(--primary); 
+                width: 36px; height: 36px; border-radius: 50%; background: var(--primary); 
                 display: flex; align-items: center; justify-content: center; font-weight: 600; 
-                font-size: 16px; color: white; flex-shrink: 0; box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+                font-size: 14px; color: white; flex-shrink: 0;
             }
             .message-wrapper.Unknown .avatar { background: #475569; }
             
             .message-content {
-                display: flex; flex-direction: column; gap: 6px; max-width: 85%;
-                background: var(--panel); padding: 16px 20px; border-radius: 0 16px 16px 16px;
-                border: 1px solid rgba(255,255,255,0.05); box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                display: flex; flex-direction: column; gap: 4px; max-width: 85%;
+                background: var(--panel); padding: 14px 18px; border-radius: 0 14px 14px 14px;
+                border: 1px solid rgba(255,255,255,0.05);
             }
             
-            .msg-header { display: flex; align-items: baseline; gap: 12px; }
-            .speaker-tag { font-weight: 600; color: var(--primary); font-size: 14px; }
+            .msg-header { display: flex; align-items: baseline; gap: 10px; }
+            .speaker-tag { font-weight: 600; color: var(--primary); font-size: 13px; }
             .message-wrapper.Unknown .speaker-tag { color: #94a3b8; }
-            .msg-meta { color: #64748b; font-size: 11px; font-weight: 500; }
-            
-            .msg-body { font-size: 15px; line-height: 1.6; color: #e2e8f0; }
+            .msg-meta { color: #64748b; font-size: 11px; }
+            .msg-body { font-size: 14.5px; line-height: 1.55; color: #e2e8f0; }
+
+            /* Speculative Placeholder Shimmer Card */
+            .placeholder-wrapper { display: flex; gap: 14px; opacity: 0.7; animation: pulse 1.5s infinite; }
+            @keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.8; } }
+            .placeholder-body { display: flex; align-items: center; gap: 6px; font-style: italic; color: #94a3b8; font-size: 13px; }
+            .spinner-dot { width: 5px; height: 5px; background: #94a3b8; border-radius: 50%; display: inline-block; }
         </style>
     </head>
     <body>
@@ -253,8 +251,8 @@ async def serve_ui():
             </div>
 
             <div>
-                <div class="section-title">Configuration</div>
-                <select id="audio-source" onchange="changeAudioSource()" style="margin-bottom: 12px;">
+                <div class="section-title">Settings</div>
+                <select id="audio-source" onchange="changeAudioSource()" style="margin-bottom: 10px;">
                     <option value="both">Mix Both (System + Mic)</option>
                     <option value="system">System Audio Only (WASAPI)</option>
                     <option value="mic">Microphone Only</option>
@@ -267,18 +265,18 @@ async def serve_ui():
             </div>
 
             <div>
-                <div class="section-title">Enroll Speaker</div>
-                <div style="display: flex; gap: 8px;">
+                <div class="section-title">Speaker Enrollment</div>
+                <div style="display: flex; gap: 6px;">
                     <input type="text" id="speaker-name" placeholder="Enter name...">
-                    <button onclick="enrollSpeaker()" style="flex: 0 0 80px;">Enroll</button>
+                    <button onclick="enrollSpeaker()" style="flex: 0 0 75px;">Enroll</button>
                 </div>
-                <div id="enroll-status" style="font-size: 12px; color: var(--success); margin-top: 6px; font-weight: 500; height: 14px;"></div>
+                <div id="enroll-status" style="font-size: 11px; color: var(--success); margin-top: 5px; height: 14px;"></div>
             </div>
 
             <div style="display: flex; flex-direction: column; flex: 1; overflow: hidden;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                     <div class="section-title" style="margin: 0;">Roster (Click to Rename)</div>
-                    <button onclick="clearSpeakers()" style="width: auto; padding: 4px 10px; font-size: 11px; border-radius: 12px;">Clear All</button>
+                    <button onclick="clearSpeakers()" style="width: auto; padding: 2px 8px; font-size: 10px; border-radius: 10px;">Clear All</button>
                 </div>
                 <ul id="speaker-list"></ul>
             </div>
@@ -288,12 +286,12 @@ async def serve_ui():
             <div id="header">
                 <h2>Live Meeting Transcript</h2>
                 <div class="header-buttons">
-                    <button onclick="downloadTranscript()" style="background: rgba(255,255,255,0.1); border:none;">Download .TXT</button>
-                    <button onclick="clearTranscript()" style="background: rgba(255,255,255,0.1); border:none;">Clear View</button>
+                    <button onclick="downloadTranscript()" style="background: rgba(255,255,255,0.08); border:none;">Download .TXT</button>
+                    <button onclick="clearTranscript()" style="background: rgba(255,255,255,0.08); border:none;">Clear View</button>
                 </div>
             </div>
             <div id="transcript-box">
-                <!-- Transcript messages will inject here -->
+                <!-- Messages populate here -->
             </div>
         </div>
 
@@ -303,47 +301,112 @@ async def serve_ui():
             const pendingChunks = {}; 
             let ws;
 
+            // Conversation tracking variables for Smart Clubbing
+            let lastSpeaker = null;
+            let lastEpoch = 0;
+            let currentBubbleWordCount = 0;
+            let activeBubbleElement = null;
+
             function initWebSocket() {
                 const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                 ws = new WebSocket(`${proto}//${window.location.host}/ws`);
 
                 ws.onmessage = (event) => {
                     const data = JSON.parse(event.data);
-                    pendingChunks[data.seq] = data;
-                    
-                    while (pendingChunks[expectedSeq]) {
-                        displayMessage(pendingChunks[expectedSeq]);
-                        delete pendingChunks[expectedSeq];
-                        expectedSeq++;
+
+                    if (data.type === "pending") {
+                        showPlaceholder(data);
+                    } else if (data.type === "cancel") {
+                        removePlaceholder(data.seq);
+                    } else if (data.type === "transcript") {
+                        removePlaceholder(data.seq);
+                        
+                        pendingChunks[data.seq] = data;
+                        while (pendingChunks[expectedSeq]) {
+                            renderTranscriptChunk(pendingChunks[expectedSeq]);
+                            delete pendingChunks[expectedSeq];
+                            expectedSeq++;
+                        }
                     }
                 };
                 ws.onclose = () => setTimeout(initWebSocket, 2000);
             }
 
-            function displayMessage(item) {
+            function showPlaceholder(data) {
                 const box = document.getElementById('transcript-box');
-                const div = document.createElement('div');
-                const isUnknown = item.speaker.startsWith('Unknown');
-                
-                div.className = `message-wrapper ${isUnknown ? 'Unknown' : ''}`;
-                div.setAttribute('data-speaker', item.speaker);
-                div.setAttribute('data-time', item.timestamp);
-                div.setAttribute('data-text', item.text);
+                // Don't duplicate placeholder if already present
+                if (document.getElementById(`placeholder-${data.seq}`)) return;
 
-                const initial = isUnknown ? '?' : item.speaker.charAt(0).toUpperCase();
-
-                div.innerHTML = `
-                    <div class="avatar">${initial}</div>
-                    <div class="message-content">
-                        <div class="msg-header">
-                            <span class="speaker-tag">${item.speaker}</span>
-                            <span class="msg-meta">${item.timestamp}</span>
+                const pDiv = document.createElement('div');
+                pDiv.id = `placeholder-${data.seq}`;
+                pDiv.className = 'placeholder-wrapper';
+                pDiv.innerHTML = `
+                    <div class="avatar" style="background: #334155;">...</div>
+                    <div class="message-content" style="background: rgba(30, 41, 59, 0.4);">
+                        <div class="placeholder-body">
+                            <span>Transcribing audio</span>
+                            <span class="spinner-dot"></span>
                         </div>
-                        <div class="msg-body">${item.text}</div>
                     </div>
                 `;
-                
-                box.appendChild(div);
+                box.appendChild(pDiv);
+                box.scrollTop = box.scrollHeight;
+            }
+
+            function removePlaceholder(seq) {
+                const el = document.getElementById(`placeholder-${seq}`);
+                if (el) el.remove();
+            }
+
+            // --- SMART CLUBBING & PARAGRAPHING LOGIC ---
+            function renderTranscriptChunk(item) {
+                const box = document.getElementById('transcript-box');
+                const words = item.text.trim().split(/\s+/).length;
+
+                // Thresholds: Same speaker, spoke < 4.0 seconds ago, and bubble has < 50 words
+                const isSameSpeaker = (item.speaker === lastSpeaker);
+                const isQuickExchange = ((item.epoch - lastEpoch) <= 4.0);
+                const isUnderWordLimit = ((currentBubbleWordCount + words) <= 50);
+
+                if (isSameSpeaker && isQuickExchange && isUnderWordLimit && activeBubbleElement) {
+                    // CLUB TOGETHER: Append to the current body
+                    const bodyEl = activeBubbleElement.querySelector('.msg-body');
+                    bodyEl.textContent += " " + item.text;
+                    
+                    // Update data-text for export
+                    const currentTotalText = activeBubbleElement.getAttribute('data-text');
+                    activeBubbleElement.setAttribute('data-text', currentTotalText + " " + item.text);
+                    currentBubbleWordCount += words;
+                } else {
+                    // BREAKDOWN / NEW BUBBLE: Speaker switch, long pause, or word limit reached
+                    const div = document.createElement('div');
+                    const isUnknown = item.speaker.startsWith('Unknown');
+                    
+                    div.className = `message-wrapper ${isUnknown ? 'Unknown' : ''}`;
+                    div.setAttribute('data-speaker', item.speaker);
+                    div.setAttribute('data-time', item.timestamp);
+                    div.setAttribute('data-text', item.text);
+
+                    const initial = isUnknown ? '?' : item.speaker.charAt(0).toUpperCase();
+
+                    div.innerHTML = `
+                        <div class="avatar">${initial}</div>
+                        <div class="message-content">
+                            <div class="msg-header">
+                                <span class="speaker-tag">${item.speaker}</span>
+                                <span class="msg-meta">${item.timestamp}</span>
+                            </div>
+                            <div class="msg-body">${item.text}</div>
+                        </div>
+                    `;
+                    
+                    box.appendChild(div);
+                    activeBubbleElement = div;
+                    currentBubbleWordCount = words;
+                    lastSpeaker = item.speaker;
+                }
+
+                lastEpoch = item.epoch;
                 box.scrollTop = box.scrollHeight;
                 updateSpeakerRoster();
             }
@@ -357,6 +420,8 @@ async def serve_ui():
                     await fetch('/api/start', { method: 'POST' });
                     isRunning = true;
                     expectedSeq = 0; 
+                    lastSpeaker = null;
+                    activeBubbleElement = null;
                     btn.textContent = 'Stop Engine'; btn.className = 'danger';
                     badge.className = 'status-badge live'; badgeText.textContent = 'LIVE';
                 } else {
@@ -385,7 +450,7 @@ async def serve_ui():
                 
                 const resp = await fetch('/api/enroll', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({name: input.value.trim(), duration: 5}) });
                 if (resp.ok) {
-                    status.textContent = `Enrolled successfully!`;
+                    status.textContent = `Enrolled!`;
                     input.value = '';
                     updateSpeakerRoster();
                     setTimeout(() => status.textContent = '', 3000);
@@ -393,13 +458,12 @@ async def serve_ui():
             }
 
             async function clearSpeakers() {
-                if(confirm("Are you sure you want to clear all enrolled speakers?")) {
+                if(confirm("Clear all enrolled speaker profiles?")) {
                     await fetch('/api/clear_speakers', { method: 'POST' });
                     updateSpeakerRoster();
                 }
             }
 
-            // --- RETROACTIVE RENAME LOGIC ---
             async function updateSpeakerRoster() {
                 const resp = await fetch('/api/speakers');
                 const data = await resp.json();
@@ -408,7 +472,7 @@ async def serve_ui():
 
                 data.enrolled.forEach(spk => {
                     const li = document.createElement('li');
-                    li.innerHTML = `<span>${spk}</span> <span style="font-size: 12px; opacity: 0.6;">✎ Edit</span>`;
+                    li.innerHTML = `<span>${spk}</span> <span style="font-size: 11px; opacity: 0.6;">Edit</span>`;
                     
                     li.onclick = async () => {
                         const newName = prompt(`Rename ${spk} to:`);
@@ -421,26 +485,16 @@ async def serve_ui():
                             });
                             
                             if (renameResp.ok) {
-                                // 1. Update the UI DOM retroactively
-                                const messages = document.querySelectorAll('.message-wrapper');
-                                messages.forEach(msg => {
+                                document.querySelectorAll('.message-wrapper').forEach(msg => {
                                     if (msg.getAttribute('data-speaker') === spk) {
-                                        // Update tracking attribute
                                         msg.setAttribute('data-speaker', formattedNewName);
-                                        
-                                        // Update UI Text
                                         msg.querySelector('.speaker-tag').textContent = formattedNewName;
-                                        
-                                        // Update Avatar Initial
                                         msg.querySelector('.avatar').textContent = formattedNewName.charAt(0).toUpperCase();
-                                        
-                                        // Update styling if moving from Unknown -> Known
                                         if (msg.classList.contains('Unknown') && !formattedNewName.startsWith('Unknown')) {
                                             msg.classList.remove('Unknown');
                                         }
                                     }
                                 });
-                                // 2. Refresh the roster
                                 updateSpeakerRoster();
                             }
                         }
@@ -451,11 +505,13 @@ async def serve_ui():
 
             function clearTranscript() {
                 document.getElementById('transcript-box').innerHTML = '';
+                lastSpeaker = null;
+                activeBubbleElement = null;
             }
 
             function downloadTranscript() {
                 const msgs = document.querySelectorAll('.message-wrapper');
-                let textContent = "WispNotes Transcript\\n====================\\n\\n";
+                let textContent = "WispNotes Meeting Transcript\\n==============================\\n\\n";
                 
                 msgs.forEach(msg => {
                     const speaker = msg.getAttribute('data-speaker');
@@ -468,7 +524,7 @@ async def serve_ui():
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `Meeting_Transcript_${new Date().toISOString().slice(0,10)}.txt`;
+                a.download = `Transcript_${new Date().toISOString().slice(0,10)}.txt`;
                 a.click();
                 URL.revokeObjectURL(url);
             }
