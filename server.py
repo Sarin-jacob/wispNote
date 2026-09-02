@@ -116,34 +116,136 @@ async def serve_ui():
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>WispNotes - Live Transcription</title>
         <style>
-            :root { --bg: #0f172a; --panel: #1e293b; --text: #f8fafc; --subtext: #94a3b8; --primary: #38bdf8; --border: #334155; }
-            body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; }
-            #sidebar { width: 340px; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 24px; gap: 20px; box-sizing: border-box; }
-            h1 { font-size: 20px; margin: 0; }
-            .section-title { font-size: 12px; text-transform: uppercase; color: var(--subtext); font-weight: 700; margin-bottom: 8px; }
-            button, select, input { width: 100%; padding: 9px 12px; border-radius: 6px; border: 1px solid var(--border); background: #273549; color: white; cursor: pointer; box-sizing: border-box; }
-            button:hover { background: #334155; }
-            button.primary { background: #0284c7; border-color: #0284c7; font-weight: bold; }
-            button.danger { background: rgba(239, 68, 68, 0.2); color: #ef4444; border-color: #ef4444; }
-            #speaker-list { list-style: none; padding: 0; margin: 0; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 6px; }
-            #speaker-list li { background: var(--bg); padding: 8px 12px; border-radius: 6px; font-size: 14px; display: flex; justify-content: space-between; align-items: center; border: 1px solid var(--border); cursor: pointer; }
-            #speaker-list li:hover { border-color: var(--primary); }
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
             
-            #main { flex: 1; display: flex; flex-direction: column; padding: 30px; overflow: hidden; }
-            #header { display: flex; justify-content: space-between; border-bottom: 1px solid var(--border); padding-bottom: 16px; margin-bottom: 20px; }
-            #transcript-box { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-right: 12px; }
-            .message { display: flex; flex-direction: column; gap: 4px; background: rgba(30, 41, 59, 0.5); padding: 14px 18px; border-radius: 8px; border-left: 3px solid var(--primary); }
-            .message.Unknown { border-left-color: #64748b; }
-            .speaker-tag { font-weight: 700; color: var(--primary); }
-            .msg-meta { color: var(--subtext); font-size: 12px; margin-left: 10px; }
-            .msg-body { font-size: 15px; line-height: 1.5; color: #e2e8f0; }
+            :root { 
+                --bg: #0b1120; 
+                --panel: #1e293b; 
+                --text: #f8fafc; 
+                --subtext: #94a3b8; 
+                --primary: #3b82f6; 
+                --primary-hover: #2563eb;
+                --border: #334155;
+                --danger: #ef4444;
+                --success: #10b981;
+            }
+            
+            body { 
+                margin: 0; 
+                font-family: 'Inter', -apple-system, sans-serif; 
+                background: var(--bg); 
+                color: var(--text); 
+                display: flex; 
+                height: 100vh; 
+                overflow: hidden; 
+            }
+            
+            /* Scrollbar styling */
+            ::-webkit-scrollbar { width: 8px; }
+            ::-webkit-scrollbar-track { background: transparent; }
+            ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+            ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+            /* Sidebar */
+            #sidebar { 
+                width: 360px; 
+                background: var(--panel); 
+                border-right: 1px solid var(--border); 
+                display: flex; 
+                flex-direction: column; 
+                padding: 24px; 
+                gap: 24px; 
+                box-sizing: border-box; 
+                box-shadow: 4px 0 15px rgba(0,0,0,0.2);
+                z-index: 10;
+            }
+            
+            .header-container { display: flex; justify-content: space-between; align-items: center; }
+            h1 { font-size: 22px; margin: 0; font-weight: 700; letter-spacing: -0.5px;}
+            
+            .status-badge {
+                display: flex; align-items: center; gap: 6px;
+                padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;
+                background: rgba(148, 163, 184, 0.1); color: var(--subtext); transition: all 0.3s ease;
+            }
+            .status-badge.live { background: rgba(16, 185, 129, 0.15); color: var(--success); }
+            .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+            
+            .section-title { font-size: 11px; text-transform: uppercase; color: var(--subtext); font-weight: 700; letter-spacing: 0.5px; margin-bottom: 10px; }
+            
+            button, select, input { 
+                width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border); 
+                background: rgba(15, 23, 42, 0.6); color: white; font-family: 'Inter', sans-serif; font-size: 14px;
+                outline: none; transition: all 0.2s;
+            }
+            input:focus, select:focus { border-color: var(--primary); }
+            
+            button { background: #273549; cursor: pointer; font-weight: 500; }
+            button:hover { background: #334155; }
+            button.primary { background: var(--primary); border-color: var(--primary); font-weight: 600; box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3); }
+            button.primary:hover { background: var(--primary-hover); }
+            button.danger { background: rgba(239, 68, 68, 0.15); color: var(--danger); border-color: rgba(239, 68, 68, 0.3); }
+            button.danger:hover { background: var(--danger); color: white; }
+            
+            /* Roster List */
+            #speaker-list { list-style: none; padding: 0; margin: 0; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 8px; }
+            #speaker-list li { 
+                background: rgba(15, 23, 42, 0.4); padding: 10px 14px; border-radius: 8px; font-size: 14px; 
+                display: flex; justify-content: space-between; align-items: center; border: 1px solid transparent; 
+                cursor: pointer; transition: all 0.2s;
+            }
+            #speaker-list li:hover { border-color: var(--primary); background: rgba(15, 23, 42, 0.8); transform: translateY(-1px);}
+            
+            /* Main Chat Area */
+            #main { flex: 1; display: flex; flex-direction: column; background: var(--bg); position: relative; }
+            
+            #header { 
+                display: flex; justify-content: space-between; align-items: center; 
+                padding: 24px 40px; border-bottom: 1px solid var(--border); background: rgba(11, 17, 32, 0.8);
+                backdrop-filter: blur(10px); z-index: 5;
+            }
+            #header h2 { margin: 0; font-size: 18px; font-weight: 600; }
+            .header-buttons { display: flex; gap: 12px; }
+            .header-buttons button { width: auto; padding: 8px 16px; font-size: 13px; border-radius: 20px; }
+            
+            #transcript-box { 
+                flex: 1; overflow-y: auto; display: flex; flex-direction: column; 
+                gap: 20px; padding: 30px 40px; scroll-behavior: smooth;
+            }
+            
+            /* Message Bubbles */
+            .message-wrapper { display: flex; gap: 16px; animation: fadeIn 0.3s ease forwards; }
+            @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+            
+            .avatar {
+                width: 40px; height: 40px; border-radius: 50%; background: var(--primary); 
+                display: flex; align-items: center; justify-content: center; font-weight: 600; 
+                font-size: 16px; color: white; flex-shrink: 0; box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+            }
+            .message-wrapper.Unknown .avatar { background: #475569; }
+            
+            .message-content {
+                display: flex; flex-direction: column; gap: 6px; max-width: 85%;
+                background: var(--panel); padding: 16px 20px; border-radius: 0 16px 16px 16px;
+                border: 1px solid rgba(255,255,255,0.05); box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            }
+            
+            .msg-header { display: flex; align-items: baseline; gap: 12px; }
+            .speaker-tag { font-weight: 600; color: var(--primary); font-size: 14px; }
+            .message-wrapper.Unknown .speaker-tag { color: #94a3b8; }
+            .msg-meta { color: #64748b; font-size: 11px; font-weight: 500; }
+            
+            .msg-body { font-size: 15px; line-height: 1.6; color: #e2e8f0; }
         </style>
     </head>
     <body>
         <div id="sidebar">
-            <div>
+            <div class="header-container">
                 <h1>WispNotes</h1>
-                <span id="live-text" style="color: var(--subtext); font-size: 12px; font-weight: bold;">● STOPPED</span>
+                <div id="live-badge" class="status-badge">
+                    <div class="dot"></div>
+                    <span id="live-text">STOPPED</span>
+                </div>
             </div>
 
             <div>
@@ -152,7 +254,7 @@ async def serve_ui():
 
             <div>
                 <div class="section-title">Configuration</div>
-                <select id="audio-source" onchange="changeAudioSource()" style="margin-bottom: 8px;">
+                <select id="audio-source" onchange="changeAudioSource()" style="margin-bottom: 12px;">
                     <option value="both">Mix Both (System + Mic)</option>
                     <option value="system">System Audio Only (WASAPI)</option>
                     <option value="mic">Microphone Only</option>
@@ -166,31 +268,33 @@ async def serve_ui():
 
             <div>
                 <div class="section-title">Enroll Speaker</div>
-                <div style="display: flex; gap: 6px;">
-                    <input type="text" id="speaker-name" placeholder="Name...">
-                    <button onclick="enrollSpeaker()" style="flex: 0 0 75px;">Enroll</button>
+                <div style="display: flex; gap: 8px;">
+                    <input type="text" id="speaker-name" placeholder="Enter name...">
+                    <button onclick="enrollSpeaker()" style="flex: 0 0 80px;">Enroll</button>
                 </div>
-                <div id="enroll-status" style="font-size: 12px; color: var(--primary); margin-top: 4px;"></div>
+                <div id="enroll-status" style="font-size: 12px; color: var(--success); margin-top: 6px; font-weight: 500; height: 14px;"></div>
             </div>
 
             <div style="display: flex; flex-direction: column; flex: 1; overflow: hidden;">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                     <div class="section-title" style="margin: 0;">Roster (Click to Rename)</div>
-                    <button onclick="clearSpeakers()" style="width: auto; padding: 2px 8px; font-size: 11px;">Clear All</button>
+                    <button onclick="clearSpeakers()" style="width: auto; padding: 4px 10px; font-size: 11px; border-radius: 12px;">Clear All</button>
                 </div>
-                <ul id="speaker-list" style="margin-top: 8px;"></ul>
+                <ul id="speaker-list"></ul>
             </div>
         </div>
 
         <div id="main">
             <div id="header">
-                <h2>Live Transcript</h2>
-                <div style="display: flex; gap: 10px;">
-                    <button onclick="downloadTranscript()">Download .TXT</button>
-                    <button onclick="clearTranscript()">Clear View</button>
+                <h2>Live Meeting Transcript</h2>
+                <div class="header-buttons">
+                    <button onclick="downloadTranscript()" style="background: rgba(255,255,255,0.1); border:none;">Download .TXT</button>
+                    <button onclick="clearTranscript()" style="background: rgba(255,255,255,0.1); border:none;">Clear View</button>
                 </div>
             </div>
-            <div id="transcript-box"></div>
+            <div id="transcript-box">
+                <!-- Transcript messages will inject here -->
+            </div>
         </div>
 
         <script>
@@ -205,8 +309,6 @@ async def serve_ui():
 
                 ws.onmessage = (event) => {
                     const data = JSON.parse(event.data);
-                    
-                    // Sequence Buffering Logic to fix out-of-order chunks
                     pendingChunks[data.seq] = data;
                     
                     while (pendingChunks[expectedSeq]) {
@@ -221,20 +323,26 @@ async def serve_ui():
             function displayMessage(item) {
                 const box = document.getElementById('transcript-box');
                 const div = document.createElement('div');
-                div.className = `message ${item.speaker.startsWith('Unknown') ? 'Unknown' : ''}`;
+                const isUnknown = item.speaker.startsWith('Unknown');
                 
-                // Add hidden data attributes for the download extractor
+                div.className = `message-wrapper ${isUnknown ? 'Unknown' : ''}`;
                 div.setAttribute('data-speaker', item.speaker);
                 div.setAttribute('data-time', item.timestamp);
                 div.setAttribute('data-text', item.text);
 
+                const initial = isUnknown ? '?' : item.speaker.charAt(0).toUpperCase();
+
                 div.innerHTML = `
-                    <div>
-                        <span class="speaker-tag">${item.speaker}</span>
-                        <span class="msg-meta">${item.timestamp}</span>
+                    <div class="avatar">${initial}</div>
+                    <div class="message-content">
+                        <div class="msg-header">
+                            <span class="speaker-tag">${item.speaker}</span>
+                            <span class="msg-meta">${item.timestamp}</span>
+                        </div>
+                        <div class="msg-body">${item.text}</div>
                     </div>
-                    <div class="msg-body">${item.text}</div>
                 `;
+                
                 box.appendChild(div);
                 box.scrollTop = box.scrollHeight;
                 updateSpeakerRoster();
@@ -242,18 +350,20 @@ async def serve_ui():
 
             async function toggleEngine() {
                 const btn = document.getElementById('btn-toggle');
-                const badge = document.getElementById('live-text');
+                const badge = document.getElementById('live-badge');
+                const badgeText = document.getElementById('live-text');
+                
                 if (!isRunning) {
                     await fetch('/api/start', { method: 'POST' });
                     isRunning = true;
-                    expectedSeq = 0; // Reset sequencing on start
+                    expectedSeq = 0; 
                     btn.textContent = 'Stop Engine'; btn.className = 'danger';
-                    badge.textContent = '● LIVE'; badge.style.color = '#22c55e';
+                    badge.className = 'status-badge live'; badgeText.textContent = 'LIVE';
                 } else {
                     await fetch('/api/stop', { method: 'POST' });
                     isRunning = false;
                     btn.textContent = 'Start Listening'; btn.className = 'primary';
-                    badge.textContent = '● STOPPED'; badge.style.color = 'var(--subtext)';
+                    badge.className = 'status-badge'; badgeText.textContent = 'STOPPED';
                 }
             }
 
@@ -289,6 +399,7 @@ async def serve_ui():
                 }
             }
 
+            // --- RETROACTIVE RENAME LOGIC ---
             async function updateSpeakerRoster() {
                 const resp = await fetch('/api/speakers');
                 const data = await resp.json();
@@ -297,12 +408,41 @@ async def serve_ui():
 
                 data.enrolled.forEach(spk => {
                     const li = document.createElement('li');
-                    li.innerHTML = `<span>${spk}</span> <span style="font-size: 10px;">✏️</span>`;
+                    li.innerHTML = `<span>${spk}</span> <span style="font-size: 12px; opacity: 0.6;">✎ Edit</span>`;
+                    
                     li.onclick = async () => {
                         const newName = prompt(`Rename ${spk} to:`);
                         if (newName && newName.trim() !== "") {
-                            await fetch('/api/rename', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({old_name: spk, new_name: newName.trim()}) });
-                            updateSpeakerRoster();
+                            const formattedNewName = newName.trim();
+                            const renameResp = await fetch('/api/rename', { 
+                                method: 'POST', 
+                                headers: {'Content-Type':'application/json'}, 
+                                body: JSON.stringify({old_name: spk, new_name: formattedNewName}) 
+                            });
+                            
+                            if (renameResp.ok) {
+                                // 1. Update the UI DOM retroactively
+                                const messages = document.querySelectorAll('.message-wrapper');
+                                messages.forEach(msg => {
+                                    if (msg.getAttribute('data-speaker') === spk) {
+                                        // Update tracking attribute
+                                        msg.setAttribute('data-speaker', formattedNewName);
+                                        
+                                        // Update UI Text
+                                        msg.querySelector('.speaker-tag').textContent = formattedNewName;
+                                        
+                                        // Update Avatar Initial
+                                        msg.querySelector('.avatar').textContent = formattedNewName.charAt(0).toUpperCase();
+                                        
+                                        // Update styling if moving from Unknown -> Known
+                                        if (msg.classList.contains('Unknown') && !formattedNewName.startsWith('Unknown')) {
+                                            msg.classList.remove('Unknown');
+                                        }
+                                    }
+                                });
+                                // 2. Refresh the roster
+                                updateSpeakerRoster();
+                            }
                         }
                     };
                     list.appendChild(li);
@@ -314,7 +454,7 @@ async def serve_ui():
             }
 
             function downloadTranscript() {
-                const msgs = document.querySelectorAll('.message');
+                const msgs = document.querySelectorAll('.message-wrapper');
                 let textContent = "WispNotes Transcript\\n====================\\n\\n";
                 
                 msgs.forEach(msg => {
