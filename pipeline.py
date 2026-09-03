@@ -13,27 +13,29 @@ import pyaudiowpatch as pyaudio
 from speechbrain.inference.speaker import EncoderClassifier
 
 # ==========================================
-# CONFIGURATION
+# CONFIGURATION (Tuned for Rapid Exchanges & High Accuracy)
 # ==========================================
 WHISPER_API_URL = "http://localhost:52625/v1/audio/transcriptions"
 TARGET_SAMPLE_RATE = 16000
 VAD_FRAME_SIZE = 512
-VAD_THRESHOLD = 0.5
+
+# VAD Tuning
+VAD_THRESHOLD = 0.35           # Lowered from 0.5 to catch quiet trailing words
 
 # NPU Queue Management
-MAX_CONCURRENT_REQUESTS = 1   # Matched to FastFlowLLM's maximum queue
+MAX_CONCURRENT_REQUESTS = 1    # Keeps NPU efficient without network timeouts
 
-# Quality-Optimized Chunking (Anti-Spam)
-SILENCE_TIMEOUT_SEC = 1.0      # Wait for a solid 1s pause to naturally end a chunk
-MICRO_SILENCE_TIMEOUT = 0.4    # 400ms breath pause
-SOFT_LIMIT_SEC = 10.0          # Look for a breath at 10s
-HARD_LIMIT_SEC = 20.0          # Force cut at 20s to ensure NPU context is rich
-OVERLAP_SEC = 1.0              # 1s context overlap to prevent cut words
-MIN_SPEECH_DURATION_SEC = 0.5
+# Quality-Optimized Chunking (Anti-Spam & Anti-Drop)
+SILENCE_TIMEOUT_SEC = 0.65     # Cuts faster to separate different speakers responding quickly
+MICRO_SILENCE_TIMEOUT = 0.2    # 200ms breath pause for extremely rapid back-and-forth
+SOFT_LIMIT_SEC = 8.0           # Look for a breath at 8s
+HARD_LIMIT_SEC = 15.0          # Force cut at 15s to prevent NPU bottleneck
+OVERLAP_SEC = 0.0              # REMOVED overlapping audio to stop Whisper from dropping words!
+MIN_SPEECH_DURATION_SEC = 0.4
 
 MATCH_THRESHOLD = 0.38          
 NEW_SPEAKER_THRESHOLD = 0.28    
-MIN_SEC_FOR_NEW_PROFILE = 1.2   
+MIN_SEC_FOR_NEW_PROFILE = 1.0   
 
 # ==========================================
 # 1. SPEAKER IDENTIFIER (CPU)
@@ -49,9 +51,8 @@ class SpeakerIdentifier:
         self.unknown_count = 0
 
     def compute_embedding(self, audio_float32: np.ndarray) -> torch.Tensor:
-        max_samples = TARGET_SAMPLE_RATE * 3
-        slice_audio = audio_float32[:max_samples] if len(audio_float32) > max_samples else audio_float32
-        wav_tensor = torch.from_numpy(slice_audio).unsqueeze(0).to(torch.float32)
+        # Evaluate the ENTIRE audio chunk instead of just the first 3 seconds for better accuracy
+        wav_tensor = torch.from_numpy(audio_float32).unsqueeze(0).to(torch.float32)
         with torch.no_grad():
             embedding = self.classifier.encode_batch(wav_tensor).squeeze().cpu()
             embedding = embedding / torch.norm(embedding)
@@ -264,7 +265,6 @@ class WispPipeline:
         self.capturer = AudioCapturer(self.audio_queue, input_type=input_type)
         self.speaker_id = SpeakerIdentifier()
         self.whisper = WhisperClient(whisper_url)
-        # THREAD POOL QUEUE LIMIT MATCHED TO NPU
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENT_REQUESTS)
         self.transcript_subscribers = []  
         self.seq_counter = 0 
@@ -367,8 +367,8 @@ class WispPipeline:
                             speech_frames = []
                             is_speaking = False
                         else:
-                            overlap_count = int((OVERLAP_SEC * TARGET_SAMPLE_RATE) / VAD_FRAME_SIZE)
-                            speech_frames = speech_frames[-overlap_count:] if len(speech_frames) > overlap_count else []
+                            # Safely handle the removal of overlap logic
+                            speech_frames = []
                         silence_frame_count = 0
 
     def _dispatch_segment(self, audio_segment: np.ndarray, seq_id: int):

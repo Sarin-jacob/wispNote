@@ -378,7 +378,8 @@ async def serve_ui():
                 const words = item.text.trim().split(/\s+/).length;
 
                 const isSameSpeaker = (item.speaker === lastSpeaker);
-                const isQuickExchange = ((item.epoch - lastEpoch) <= 20.0); 
+                // Tightened exchange limit: club if spoken within 10 seconds of previous chunk
+                const isQuickExchange = ((item.epoch - lastEpoch) <= 10.0); 
                 const isUnderWordLimit = ((currentBubbleWordCount + words) <= 150); 
 
                 const speakerColor = getSpeakerColor(item.speaker);
